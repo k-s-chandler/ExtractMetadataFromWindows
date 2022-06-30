@@ -1,0 +1,76 @@
+Function Get-FolderItem {
+    
+        [cmdletbinding(DefaultParameterSetName='Filter')]
+        Param (
+            [parameter(Position=0,ValueFromPipeline=$True,ValueFromPipelineByPropertyName=$True)]
+            [Alias('FullName')]
+            [string[]]$Path = $PWD,
+            [parameter(ParameterSetName='Filter')]
+            [string[]]$Filter = '*.*',    
+            [parameter(ParameterSetName='Exclude')]
+            [string[]]$ExcludeFile,              
+            [parameter()]
+            [int]$MaxAge,
+            [parameter()]
+            [int]$MinAge
+        )
+        Begin {
+            $params = New-Object System.Collections.Arraylist
+            $params.AddRange(@("/L","/E","/NJH","/NDL","/BYTES","/FP","/NC","/XJ","/R:0","/W:0","T:W","/UNILOG:c:\temp\test.txt"))
+            If ($PSBoundParameters['MaxAge']) {
+                $params.Add("/MaxAge:$MaxAge") | Out-Null
+            }
+            If ($PSBoundParameters['MinAge']) {
+                $params.Add("/MinAge:$MinAge") | Out-Null
+            }
+        }
+        Process {
+            ForEach ($item in $Path) {
+                Try {
+                    $item = (Resolve-Path -LiteralPath $item -ErrorAction Stop).ProviderPath
+                    If (-Not (Test-Path -LiteralPath $item -Type Container -ErrorAction Stop)) {
+                        Write-Warning ("{0} is not a directory and will be skipped" -f $item)
+                        Return
+                    }
+                    If ($PSBoundParameters['ExcludeFile']) {
+                        $Script = "robocopy `"$item`" NULL $Filter $params /XF $($ExcludeFile  -join ',')"
+                    } Else {
+                        $Script = "robocopy `"$item`" NULL $Filter $params"
+                    }
+                    Write-Verbose ("Scanning {0}" -f $item)
+                    Invoke-Expression $Script | Out-Null
+                    get-content "c:\temp\test.txt" | ForEach {
+                        Try {
+                            If ($_.Trim() -match "^(?<Children>\d+)\s(?<FullName>.*)") {
+                               $object = New-Object PSObject -Property @{
+                                    FullName = $matches.FullName
+                                    #Extension = $matches.fullname -replace '.*\.(.*)','$1'
+                                    #FullPathLength = [int] $matches.FullName.Length
+                                    FileHash = Get-FileHash -LiteralPath "\\?\$($matches.FullName)" |Select -Expand Hash
+                                    #Created = ([System.IO.FileInfo] $matches.FullName).creationtime
+                                    Created = ([System.IO.FileInfo] "\\?\$($matches.FullName)").creationtime
+                                    LastWriteTime = ([System.IO.FileInfo] "\\?\$($matches.FullName)").LastWriteTime
+                                    Characters = (Get-Content -LiteralPath "\\?\$($matches.FullName)" | Measure-Object -ignorewhitespace -Character).Characters
+                                    Size = ([System.IO.FileInfo] "\\?\$($matches.FullName)").length
+                                    Access = ((Get-Acl -LiteralPath "\\?\$($matches.FullName)") |Select -Expand AccessToString)-replace '[\r\n]',' '
+                                    #$permission = (Get-Acl $Folder).Access | ?{$_.IdentityReference -match $User} | Select IdentityReference,FileSystemRights
+                                } 
+                                $object.pstypenames.insert(0,'System.IO.RobocopyDirectoryInfo')
+                                Write-Output $object
+                            } Else {
+                                Write-Verbose ("Not matched: {0}" -f $_)
+                            }
+                        } Catch {
+                            Write-Warning ("{0}" -f $_.Exception.Message)
+                            Return
+                        }
+                    }
+                } Catch {
+                    Write-Warning ("{0}" -f $_.Exception.Message)
+                    Return
+                }
+            }
+        }
+    }
+    
+ $a = Get-FolderItem "C:\Directory\Of\Folders\From\Which\You\Want\Metadata" | Export-Csv -Path C:\Directory\where\your\output\file\should\live.csv -Encoding Unicode
