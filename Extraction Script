@@ -1,3 +1,4 @@
+#Adapted from Boe Prox: https://learn-powershell.net/2013/04/01/list-all-files-regardless-of-260-character-path-restriction-using-powershell-and-robocopy/
 Function Get-FolderItem {
     
         [cmdletbinding(DefaultParameterSetName='Filter')]
